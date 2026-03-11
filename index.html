@@ -7,58 +7,42 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <style>
-        .course-cell {
-            min-height: 80px; /* 增加高度以防内容过多 */
-            cursor: pointer;
-            transition: all 0.2s;
-            position: relative;
-        }
-        .course-cell:hover {
-            background-color: #f3f4f6;
-        }
-        .course-cell:empty::after {
-            content: "";
-            color: #d1d5db;
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 0.8rem;
-            pointer-events: none;
-        }
-        /* 拖拽时的样式 */
-        .dragging {
-            opacity: 0.5;
-            border: 2px dashed #3b82f6;
-        }
-        .drag-over {
-            background-color: #dbeafe;
-        }
+        .course-cell { min-height: 80px; cursor: pointer; transition: all 0.2s; position: relative; }
+        .course-cell:hover { background-color: #f3f4f6; }
+        .course-cell:empty::after { content: "无课"; color: #d1d5db; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 0.8rem; pointer-events: none; }
+        .dragging { opacity: 0.5; border: 2px dashed #3b82f6; }
+        .drag-over { background-color: #dbeafe; }
+        #loadingOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.95); z-index: 50; display: flex; justify-content: center; align-items: center; flex-direction: column; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        .status-online { background-color: #22c55e; }
+        .status-offline { background-color: #ef4444; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen p-4 md:p-8">
+    <!-- 加载遮罩 -->
+    <div id="loadingOverlay">
+        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+        <p class="text-gray-600 font-medium" id="loadingText">正在连接云端...</p>
+    </div>
+
     <div class="max-w-7xl mx-auto">
-        <!-- 顶部控制栏 -->
+        <!-- 状态指示器 -->
+        <div class="flex items-center gap-2 mb-4 text-sm">
+            <span class="status-dot status-offline" id="statusDot"></span>
+            <span id="statusText" class="text-gray-500">检查连接中...</span>
+        </div>
+
         <div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
-            <h1 class="text-3xl font-bold text-gray-800">课表管理系统</h1>
+            <h1 class="text-3xl font-bold text-gray-800">☁️ 云端课表系统</h1>
             <div class="flex flex-wrap gap-2 justify-center">
-                <button id="prevWeek" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition shadow">
-                    ← 上一周
-                </button>
-                <span id="weekInfo" class="px-4 py-2 bg-white border border-gray-300 rounded text-lg font-medium text-gray-700 flex items-center"></span>
-                <button id="nextWeek" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition shadow">
-                    下一周 →
-                </button>
-                <button id="exportPdf" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition shadow">
-                    📄 导出 PDF
-                </button>
-                <button id="resetData" class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition shadow" title="清除本地缓存，恢复默认课表">
-                    🔄 重置课表
-                </button>
+                <button id="prevWeek" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition shadow">← 上一周</button>
+                <span id="weekInfo" class="px-4 py-2 bg-white border border-gray-300 rounded text-lg font-medium text-gray-700"></span>
+                <button id="nextWeek" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition shadow">下一周 →</button>
+                <button id="exportPdf" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition shadow">📄 导出 PDF</button>
+                <button id="resetData" class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition shadow">🔄 重置本周</button>
             </div>
         </div>
 
-        <!-- 课表容器 -->
         <div id="timetableContainer" class="overflow-x-auto bg-white rounded-lg shadow-md p-2">
             <table class="w-full border-collapse min-w-[800px]">
                 <thead>
@@ -71,19 +55,21 @@
                         <th class="border border-gray-300 px-2 py-3 text-center font-semibold">周五</th>
                     </tr>
                 </thead>
-                <tbody id="timetableBody">
-                    <!-- 课程内容将通过 JS 渲染 -->
-                </tbody>
+                <tbody id="timetableBody"></tbody>
             </table>
         </div>
         
         <div class="mt-4 text-sm text-gray-500 text-center">
-            💡 提示：点击单元格可编辑内容；拖拽单元格可交换课程位置。
+            💡 点击单元格编辑，拖拽交换课程。数据自动同步到云端。
         </div>
     </div>
 
     <script>
-        // 默认课表数据
+        // ================= 配置区域 =================
+        // ⚠️ 这里必须和 api/timetable.js 里的密码一致
+        const API_TOKEN = "my_secure_password_2024";
+        // ===========================================
+
         const defaultTimetable = {
             "早读": ["语文\n六 14 班", "语文\n六 9 班", "语文\n六 9 班", "", "语文\n六 14 班"],
             "第一节\n8:00~8:40": ["语文\n六 9 班", "", "", "语文\n六 14 班", ""],
@@ -100,108 +86,152 @@
             "第九节\n16:40~17:20": ["", "语文\n六 9 班", "语文\n六 14 班", "", ""]
         };
 
-        // 日期配置：2026 年 3 月 9 日为第 1 周
         const startDate = new Date(2026, 2, 9);
         let currentWeek = 0;
+        let currentData = {};
+        let isSaving = false;
 
         // 初始化
-        function init() {
-            renderTimetable();
+        async function init() {
+            await checkConnection();
+            await loadAndRender();
             setupDragAndDrop();
             updateWeekInfo();
+            hideLoading();
         }
 
-        // 从本地存储加载课表（增加校验逻辑）
-        function loadTimetable() {
-            const key = `timetable_week_${currentWeek}`;
-            const saved = localStorage.getItem(key);
+        // 检查 API 连接
+        async function checkConnection() {
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
             
-            if (saved) {
-                try {
-                    const parsed = JSON.parse(saved);
-                    // 校验数据是否有效（必须有键值对）
-                    if (parsed && Object.keys(parsed).length > 0) {
-                        return parsed;
-                    }
-                } catch (e) {
-                    console.error("本地数据损坏，重置为默认");
+            try {
+                const response = await fetch('/api/timetable?week=0');
+                if (response.ok) {
+                    statusDot.className = 'status-dot status-online';
+                    statusText.textContent = '云端已连接';
+                } else {
+                    throw new Error('API error');
                 }
+            } catch (error) {
+                statusDot.className = 'status-dot status-offline';
+                statusText.textContent = '连接失败，请检查部署';
+                console.error('连接检查失败:', error);
             }
-            return defaultTimetable;
         }
 
-        // 保存课表到本地存储
-        function saveTimetable(data) {
-            localStorage.setItem(`timetable_week_${currentWeek}`, JSON.stringify(data));
+        // 加载并渲染
+        async function loadAndRender() {
+            showLoading('正在加载课表...');
+            try {
+                const response = await fetch(`/api/timetable?week=${currentWeek}`);
+                let data = await response.json();
+                
+                if (!data) {
+                    data = JSON.parse(JSON.stringify(defaultTimetable));
+                    await saveData(data);
+                }
+                
+                currentData = data;
+                renderTimetable(data);
+            } catch (error) {
+                console.error('加载失败:', error);
+                alert('加载失败，请刷新页面重试');
+            }
+        }
+
+        // 保存数据
+        async function saveData(data) {
+            if (isSaving) return;
+            isSaving = true;
+            
+            showLoading('正在保存...');
+            
+            try {
+                const response = await fetch('/api/timetable', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${API_TOKEN}`
+                    },
+                    body: JSON.stringify({
+                        week: currentWeek,
+                        data: data
+                    })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    if (response.status === 401) {
+                        alert('认证失败！请检查 API_TOKEN 是否正确');
+                    } else {
+                        throw new Error(error.error || '保存失败');
+                    }
+                }
+            } catch (error) {
+                console.error('保存失败:', error);
+                alert('保存失败：' + error.message);
+            } finally {
+                isSaving = false;
+                hideLoading();
+            }
         }
 
         // 渲染课表
-        function renderTimetable() {
+        function renderTimetable(data) {
             const tbody = document.getElementById('timetableBody');
-            const data = loadTimetable();
             tbody.innerHTML = '';
-
+            
             Object.keys(data).forEach(section => {
                 const row = document.createElement('tr');
                 
-                // 节次列
                 const sectionCell = document.createElement('td');
                 sectionCell.className = 'border border-gray-300 px-2 py-3 font-medium bg-gray-50 text-sm whitespace-pre-line';
                 sectionCell.textContent = section;
                 row.appendChild(sectionCell);
 
-                // 周一到周五列
                 data[section].forEach((content, dayIndex) => {
                     const cell = document.createElement('td');
-                    // 添加 data 属性用于拖拽识别
                     cell.className = 'border border-gray-300 px-2 py-3 course-cell text-sm whitespace-pre-line';
                     cell.dataset.section = section;
                     cell.dataset.day = dayIndex;
                     
-                    // 处理内容显示
                     if (content && content.trim() !== "") {
                         cell.innerHTML = content.replace(/\n/g, '<br>');
-                    } else {
-                        cell.innerHTML = ""; // 留空，CSS 会显示“无课”
                     }
                     
                     cell.addEventListener('click', () => editCell(cell));
                     row.appendChild(cell);
                 });
-
+                
                 tbody.appendChild(row);
             });
         }
 
-        // 编辑单元格内容
+        // 编辑单元格
         function editCell(cell) {
-            // 防止重复创建输入框
             if (cell.querySelector('textarea')) return;
-
-            const currentText = cell.innerText; // 使用 innerText 获取纯文本
+            
+            const currentText = cell.innerText;
             const input = document.createElement('textarea');
             input.className = 'w-full h-full p-1 border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-200';
             input.value = currentText;
             input.style.resize = 'none';
-            input.style.height = '100%';
             
             cell.innerHTML = '';
             cell.appendChild(input);
             input.focus();
 
-            const saveEdit = () => {
+            const saveEdit = async () => {
                 const newText = input.value.trim();
-                // 更新视觉
                 if (newText) {
                     cell.innerHTML = newText.replace(/\n/g, '<br>');
                 } else {
                     cell.innerHTML = "";
                 }
                 
-                // 更新数据
-                const data = loadTimetable();
-                data[cell.dataset.section][cell.dataset.day] = newText;
-                saveTimetable(data);
+                currentData[cell.dataset.section][cell.dataset.day] = newText;
+                await saveData(currentData);
             };
 
             input.addEventListener('blur', saveEdit);
@@ -213,62 +243,52 @@
             });
         }
 
-        // 设置拖拽排序 (原生 Drag API)
+        // 拖拽功能
         function setupDragAndDrop() {
             const cells = document.querySelectorAll('.course-cell');
             cells.forEach(cell => {
                 cell.setAttribute('draggable', 'true');
                 
-                cell.addEventListener('dragstart', function(e) {
+                cell.addEventListener('dragstart', function() {
                     this.classList.add('dragging');
-                    e.dataTransfer.effectAllowed = 'move';
-                    // 存储被拖拽元素的信息
-                    e.dataTransfer.setData('text/plain', JSON.stringify({
-                        section: this.dataset.section,
-                        day: this.dataset.day
-                    }));
                 });
-
+                
                 cell.addEventListener('dragend', function() {
                     this.classList.remove('dragging');
                     document.querySelectorAll('.course-cell').forEach(c => c.classList.remove('drag-over'));
                 });
-
+                
                 cell.addEventListener('dragover', function(e) {
-                    e.preventDefault(); // 必须阻止默认行为才能允许 drop
-                    e.dataTransfer.dropEffect = 'move';
+                    e.preventDefault();
                     if (this !== document.querySelector('.dragging')) {
                         this.classList.add('drag-over');
                     }
                 });
-
+                
                 cell.addEventListener('dragleave', function() {
                     this.classList.remove('drag-over');
                 });
-
-                cell.addEventListener('drop', function(e) {
+                
+                cell.addEventListener('drop', async function(e) {
                     e.preventDefault();
                     this.classList.remove('drag-over');
                     const draggingCell = document.querySelector('.dragging');
                     
                     if (draggingCell && draggingCell !== this) {
-                        // 1. 交换视觉内容 (innerHTML)
                         const tempHTML = draggingCell.innerHTML;
                         draggingCell.innerHTML = this.innerHTML;
                         this.innerHTML = tempHTML;
 
-                        // 2. 交换底层数据
-                        const data = loadTimetable();
-                        const sourceSection = draggingCell.dataset.section;
-                        const sourceDay = draggingCell.dataset.day;
-                        const targetSection = this.dataset.section;
-                        const targetDay = this.dataset.day;
-
-                        const tempData = data[sourceSection][sourceDay];
-                        data[sourceSection][sourceDay] = data[targetSection][targetDay];
-                        data[targetSection][targetDay] = tempData;
+                        const sSec = draggingCell.dataset.section;
+                        const sDay = draggingCell.dataset.day;
+                        const tSec = this.dataset.section;
+                        const tDay = this.dataset.day;
                         
-                        saveTimetable(data);
+                        const temp = currentData[sSec][sDay];
+                        currentData[sSec][sDay] = currentData[tSec][tDay];
+                        currentData[tSec][tDay] = temp;
+                        
+                        await saveData(currentData);
                     }
                 });
             });
@@ -279,90 +299,72 @@
             const weekStart = new Date(startDate);
             weekStart.setDate(startDate.getDate() + currentWeek * 7);
             const weekEnd = new Date(weekStart);
-            weekEnd.setDate(weekStart.getDate() + 4); // 只显示到周五
-
+            weekEnd.setDate(weekStart.getDate() + 4);
+            
             const format = (date) => `${date.getMonth() + 1}月${date.getDate()}日`;
             document.getElementById('weekInfo').textContent = `第${currentWeek + 1}周 (${format(weekStart)} - ${format(weekEnd)})`;
         }
 
         // 切换周次
-        document.getElementById('prevWeek').addEventListener('click', () => {
+        document.getElementById('prevWeek').addEventListener('click', async () => {
             if (currentWeek > 0) {
                 currentWeek--;
-                renderTimetable();
+                await loadAndRender();
                 setupDragAndDrop();
                 updateWeekInfo();
-            } else {
-                alert("已经是第一周了");
             }
         });
 
-        document.getElementById('nextWeek').addEventListener('click', () => {
+        document.getElementById('nextWeek').addEventListener('click', async () => {
             currentWeek++;
-            renderTimetable();
+            await loadAndRender();
             setupDragAndDrop();
             updateWeekInfo();
         });
 
         // 重置数据
-        document.getElementById('resetData').addEventListener('click', () => {
-            if(confirm('确定要重置当前周的课表为默认状态吗？此操作不可撤销。')) {
-                localStorage.removeItem(`timetable_week_${currentWeek}`);
-                renderTimetable();
+        document.getElementById('resetData').addEventListener('click', async () => {
+            if (confirm('确定要重置当前周为默认课表吗？')) {
+                currentData = JSON.parse(JSON.stringify(defaultTimetable));
+                await saveData(currentData);
+                renderTimetable(currentData);
                 setupDragAndDrop();
                 alert('已重置为默认课表');
             }
         });
 
-        // 导出 PDF (修复版)
+        // 导出 PDF
         document.getElementById('exportPdf').addEventListener('click', () => {
             const element = document.getElementById('timetableContainer');
             const originalOverflow = element.style.overflow;
-            const originalShadow = element.style.boxShadow;
+            element.style.overflow = 'visible';
             
-            // 1. 临时修改样式以捕获完整内容
-            element.style.overflow = 'visible'; // 关键：允许内容溢出以便截图
-            element.style.boxShadow = 'none';   // 去除阴影让 PDF 更干净
-            
-            // 临时移除所有单元格的 hover 效果，避免截图时有背景色
-            document.querySelectorAll('.course-cell').forEach(c => c.style.backgroundColor = 'white');
-
             const opt = {
                 margin: 10,
                 filename: `课表_第${currentWeek + 1}周.pdf`,
                 image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { 
-                    scale: 2,
-                    useCORS: true,
-                    logging: false
-                },
+                html2canvas: { scale: 2 },
                 jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
             };
-
-            // 显示加载提示
-            const btn = document.getElementById('exportPdf');
-            const originalText = btn.textContent;
-            btn.textContent = '生成中...';
-            btn.disabled = true;
-
+            
             html2pdf().set(opt).from(element).save().then(() => {
-                // 2. 恢复样式
                 element.style.overflow = originalOverflow;
-                element.style.boxShadow = originalShadow;
-                document.querySelectorAll('.course-cell').forEach(c => c.style.backgroundColor = '');
-                btn.textContent = originalText;
-                btn.disabled = false;
-            }).catch(err => {
-                console.error(err);
-                alert('导出失败，请检查控制台或尝试缩小浏览器窗口后重试');
-                btn.textContent = originalText;
-                btn.disabled = false;
             });
         });
 
-        // 页面加载完成后初始化
+        // 辅助函数
+        function showLoading(text) {
+            const overlay = document.getElementById('loadingOverlay');
+            document.getElementById('loadingText').textContent = text;
+            overlay.style.display = 'flex';
+        }
+
+        function hideLoading() {
+            document.getElementById('loadingOverlay').style.display = 'none';
+        }
+
+        // 页面加载
         document.addEventListener('DOMContentLoaded', init);
     </script>
 </body>
 </html>
-
