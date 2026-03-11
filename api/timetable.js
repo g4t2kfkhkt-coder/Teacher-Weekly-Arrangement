@@ -4,8 +4,7 @@ export const config = {
   runtime: 'edge',
 };
 
-// ⚠️ 修改这里的密码，防止别人篡改你的课表
-const API_TOKEN = "zby20010117";
+const API_TOKEN = "zby20010117"; // 记得改成和你的 index.html 一致的密码
 
 export default async function handler(req) {
   const headers = {
@@ -19,11 +18,18 @@ export default async function handler(req) {
   }
 
   try {
-    // 读取数据
+    // GET - 读取数据
     if (req.method === 'GET') {
-      const week = req.nextUrl.searchParams.get('week') || '0';
+      // 修复：使用 req.url 而不是 req.nextUrl
+      const url = new URL(req.url);
+      const week = url.searchParams.get('week') || '0';
       const key = `timetable_week_${week}`;
+      
+      console.log('读取数据，key:', key);
+      
       const data = await kv.get(key);
+      
+      console.log('读取结果:', data);
       
       return new Response(JSON.stringify(data || null), {
         status: 200,
@@ -31,7 +37,7 @@ export default async function handler(req) {
       });
     }
 
-    // 保存数据
+    // POST - 保存数据
     if (req.method === 'POST') {
       const authHeader = req.headers.get('Authorization');
       if (authHeader !== `Bearer ${API_TOKEN}`) {
@@ -44,15 +50,19 @@ export default async function handler(req) {
       const body = await req.json();
       const { week, data } = body;
       
-      if (!week || !data) {
-        return new Response(JSON.stringify({ error: 'Missing data' }), {
+      console.log('保存数据，week:', week, 'hasData:', !!data);
+      
+      if (week === undefined || week === null) {
+        return new Response(JSON.stringify({ error: 'Missing week' }), {
           status: 400,
           headers,
         });
       }
 
       const key = `timetable_week_${week}`;
-      await kv.set(key, data);
+      const dataToSave = data || {};
+      
+      await kv.set(key, dataToSave);
 
       return new Response(JSON.stringify({ success: true }), {
         status: 200,
@@ -62,7 +72,7 @@ export default async function handler(req) {
 
     return new Response('Method Not Allowed', { status: 405, headers });
   } catch (error) {
-    console.error(error);
+    console.error('API 错误:', error);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers,
