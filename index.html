@@ -3,397 +3,365 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>我的课表</title>
-    <!-- 引入 Tailwind CSS -->
+    <title>课表管理系统</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 引入 jsPDF -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <!-- 引入 html2canvas (导出 PDF 必须) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <style>
         .course-cell {
-            min-height: 60px;
+            min-height: 80px; /* 增加高度以防内容过多 */
             cursor: pointer;
             transition: all 0.2s;
+            position: relative;
         }
         .course-cell:hover {
             background-color: #f3f4f6;
         }
-        .sortable-ghost {
-            opacity: 0.4;
-            background-color: #e5e7eb;
+        .course-cell:empty::after {
+            content: "无课";
+            color: #d1d5db;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 0.8rem;
+            pointer-events: none;
+        }
+        /* 拖拽时的样式 */
+        .dragging {
+            opacity: 0.5;
+            border: 2px dashed #3b82f6;
+        }
+        .drag-over {
+            background-color: #dbeafe;
         }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen p-4 md:p-8">
-    <div class="max-w-6xl mx-auto">
-        <div class="flex justify-between items-center mb-6">
-            <h1 class="text-2xl md:text-3xl font-bold text-gray-800">我的课表</h1>
-            <div class="flex gap-2">
-                <button id="prevWeek" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">上一周</button>
-                <span id="weekInfo" class="px-4 py-2 bg-white border rounded"></span>
-                <button id="nextWeek" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">下一周</button>
-                <button id="exportPdf" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 flex items-center gap-2">
-                    <span>导出 PDF</span>
+    <div class="max-w-7xl mx-auto">
+        <!-- 顶部控制栏 -->
+        <div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+            <h1 class="text-3xl font-bold text-gray-800">课表管理系统</h1>
+            <div class="flex flex-wrap gap-2 justify-center">
+                <button id="prevWeek" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition shadow">
+                    ← 上一周
+                </button>
+                <span id="weekInfo" class="px-4 py-2 bg-white border border-gray-300 rounded text-lg font-medium text-gray-700 flex items-center"></span>
+                <button id="nextWeek" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition shadow">
+                    下一周 →
+                </button>
+                <button id="exportPdf" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition shadow">
+                    📄 导出 PDF
+                </button>
+                <button id="resetData" class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition shadow" title="清除本地缓存，恢复默认课表">
+                    🔄 重置课表
                 </button>
             </div>
         </div>
 
-        <div id="timetable" class="overflow-x-auto">
-            <table class="w-full border-collapse bg-white shadow-md rounded-lg">
+        <!-- 课表容器 -->
+        <div id="timetableContainer" class="overflow-x-auto bg-white rounded-lg shadow-md p-2">
+            <table class="w-full border-collapse min-w-[800px]">
                 <thead>
                     <tr class="bg-gray-100">
-                        <th class="border p-3 text-center">节次</th>
-                        <th class="border p-3 text-center">周一</th>
-                        <th class="border p-3 text-center">周二</th>
-                        <th class="border p-3 text-center">周三</th>
-                        <th class="border p-3 text-center">周四</th>
-                        <th class="border p-3 text-center">周五</th>
+                        <th class="border border-gray-300 px-2 py-3 text-left font-semibold w-32">节次/时间</th>
+                        <th class="border border-gray-300 px-2 py-3 text-center font-semibold">周一</th>
+                        <th class="border border-gray-300 px-2 py-3 text-center font-semibold">周二</th>
+                        <th class="border border-gray-300 px-2 py-3 text-center font-semibold">周三</th>
+                        <th class="border border-gray-300 px-2 py-3 text-center font-semibold">周四</th>
+                        <th class="border border-gray-300 px-2 py-3 text-center font-semibold">周五</th>
                     </tr>
                 </thead>
                 <tbody id="timetableBody">
-                    <!-- 内容由 JS 动态生成 -->
+                    <!-- 课程内容将通过 JS 渲染 -->
                 </tbody>
             </table>
         </div>
-    </div>
-
-    <!-- 编辑弹窗 -->
-    <div id="editModal" class="fixed inset-0 bg-black/50 flex items-center justify-center hidden z-50">
-        <div class="bg-white p-6 rounded-lg w-80 shadow-xl">
-            <h3 class="text-lg font-bold mb-4">编辑课程</h3>
-            <textarea id="editInput" class="w-full p-2 border rounded mb-4" rows="4"></textarea>
-            <div class="flex justify-end gap-2">
-                <button id="cancelEdit" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">取消</button>
-                <button id="saveEdit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">保存</button>
-            </div>
+        
+        <div class="mt-4 text-sm text-gray-500 text-center">
+            💡 提示：点击单元格可编辑内容；拖拽单元格可交换课程位置。
         </div>
     </div>
 
     <script>
-        const { jsPDF } = window.jspdf;
-        const startDate = new Date(2026, 2, 9); // 2026 年 3 月 9 日
+        // 默认课表数据
+        const defaultTimetable = {
+            "早读": ["语文\n六 14 班", "语文\n六 9 班", "语文\n六 9 班", "", "语文\n六 14 班"],
+            "第一节\n8:00~8:40": ["语文\n六 9 班", "", "", "语文\n六 14 班", ""],
+            "第二节\n8:50~9:30": ["", "语文\n六 14 班", "语文\n六 9 班", "", "语文\n六 9 班"],
+            "大课间\n9:30-10:15": ["", "", "", "", ""],
+            "第三节*眼操\n10:15-11:00": ["语文\n六 14 班", "语文\n六 9 班", "", "语文\n六 14 班", ""],
+            "第四节\n11:10-11:50": ["", "", "", "语文\n六 9 班", "语文\n六 14 班"],
+            "午休年会\n12:30-12:50": ["班团队会\n六 14 班", "语文\n六 14 班", "", "", "语文\n六 9 班"],
+            "第五节\n13:00~13:40": ["班团队会\n六 14 班", "", "语文\n六 14 班", "", ""],
+            "第六节\n13:50~14:30": ["", "", "", "", ""],
+            "大课间\n14:30-15:00": ["", "", "", "", ""],
+            "第七节\n15:00~15:40": ["", "", "语文\n六 9 班", "", ""],
+            "第八节\n15:50~16:30": ["语文\n六 9 班", "语文\n六 14 班", "", "", ""],
+            "第九节\n16:40~17:20": ["", "语文\n六 9 班", "语文\n六 14 班", "", ""]
+        };
+
+        // 日期配置：2026 年 3 月 9 日为第 1 周
+        const startDate = new Date(2026, 2, 9);
         let currentWeek = 0;
-        let currentEditCell = null;
 
-        // 【已修改】默认课表数据：大课间已拆分为每天独立的格子
-        const defaultTimetable = [
-            // 0. 早读
-            [
-                { text: "语文\n六 14 班", time: "7:20-7:50" },
-                { text: "语文\n六 9 班", time: "7:20-7:50" },
-                { text: "语文\n六 9 班", time: "7:20-7:50" },
-                { text: "", time: "7:20-7:50" },
-                { text: "语文\n六 14 班", time: "7:20-7:50" }
-            ],
-            // 1. 第一节
-            [
-                { text: "语文\n六 9 班", time: "8:00~8:40" },
-                { text: "", time: "8:00~8:40" },
-                { text: "", time: "8:00~8:40" },
-                { text: "语文\n六 14 班", time: "8:00~8:40" },
-                { text: "", time: "8:00~8:40" }
-            ],
-            // 2. 第二节
-            [
-                { text: "", time: "8:50~9:30" },
-                { text: "语文\n六 14 班", time: "8:50~9:30" },
-                { text: "语文\n六 9 班", time: "8:50~9:30" },
-                { text: "", time: "8:50~9:30" },
-                { text: "语文\n六 9 班", time: "8:50~9:30" }
-            ],
-            // 3. 大课间 (已拆分，每天独立)
-            [
-                { text: "大课间", time: "9:30-10:15" },
-                { text: "大课间", time: "9:30-10:15" },
-                { text: "大课间", time: "9:30-10:15" },
-                { text: "大课间", time: "9:30-10:15" },
-                { text: "大课间", time: "9:30-10:15" }
-            ],
-            // 4. 第三节
-            [
-                { text: "语文\n六 14 班", time: "10:15-11:00" },
-                { text: "语文\n六 9 班", time: "10:15-11:00" },
-                { text: "", time: "10:15-11:00" },
-                { text: "语文\n六 14 班", time: "10:15-11:00" },
-                { text: "", time: "10:15-11:00" }
-            ],
-            // 5. 第四节
-            [
-                { text: "", time: "11:10-11:50" },
-                { text: "", time: "11:10-11:50" },
-                { text: "", time: "11:10-11:50" },
-                { text: "语文\n六 9 班", time: "11:10-11:50" },
-                { text: "语文\n六 14 班", time: "11:10-11:50" }
-            ],
-            // 6. 午休午会
-            [
-                { text: "班团队会\n六 14 班", time: "12:30-12:50" },
-                { text: "语文\n六 14 班", time: "12:30-12:50" },
-                { text: "", time: "12:30-12:50" },
-                { text: "", time: "12:30-12:50" },
-                { text: "语文\n六 9 班", time: "12:30-12:50" }
-            ],
-            // 7. 第五节
-            [
-                { text: "班团队会\n六 14 班", time: "13:00~13:40" },
-                { text: "", time: "13:00~13:40" },
-                { text: "语文\n六 9 班", time: "13:00~13:40" },
-                { text: "", time: "13:00~13:40" },
-                { text: "", time: "13:00~13:40" }
-            ],
-            // 8. 第六节
-            [
-                { text: "", time: "13:50~14:30" },
-                { text: "", time: "13:50~14:30" },
-                { text: "", time: "13:50~14:30" },
-                { text: "", time: "13:50~14:30" },
-                { text: "", time: "13:50~14:30" }
-            ],
-            // 9. 大课间 (已拆分，每天独立)
-            [
-                { text: "大课间", time: "14:30-15:00" },
-                { text: "大课间", time: "14:30-15:00" },
-                { text: "大课间", time: "14:30-15:00" },
-                { text: "大课间", time: "14:30-15:00" },
-                { text: "大课间", time: "14:30-15:00" }
-            ],
-            // 10. 第七节
-            [
-                { text: "", time: "15:00~15:40" },
-                { text: "", time: "15:00~15:40" },
-                { text: "语文\n六 9 班", time: "15:00~15:40" },
-                { text: "", time: "15:00~15:40" },
-                { text: "", time: "15:00~15:40" }
-            ],
-            // 11. 第八节
-            [
-                { text: "语文\n六 9 班", time: "15:50~16:30" },
-                { text: "语文\n六 14 班", time: "15:50~16:30" },
-                { text: "", time: "15:50~16:30" },
-                { text: "", time: "15:50~16:30" },
-                { text: "", time: "15:50~16:30" }
-            ],
-            // 12. 第九节
-            [
-                { text: "", time: "16:40~17:20" },
-                { text: "语文\n六 9 班", time: "16:40~17:20" },
-                { text: "语文\n六 14 班", time: "16:40~17:20" },
-                { text: "", time: "16:40~17:20" },
-                { text: "", time: "16:40~17:20" }
-            ]
-        ];
+        // 初始化
+        function init() {
+            renderTimetable();
+            setupDragAndDrop();
+            updateWeekInfo();
+        }
 
-        // 行标签
-        const rowLabels = [
-            "早读\n7:20-7:50",
-            "第一节\n8:00~8:40",
-            "第二节\n8:50~9:30",
-            "大课间\n9:30-10:15",
-            "第三节\n10:15-11:00",
-            "第四节\n11:10-11:50",
-            "午休午会\n12:30-12:50",
-            "第五节\n13:00~13:40",
-            "第六节\n13:50~14:30",
-            "大课间\n14:30-15:00",
-            "第七节\n15:00~15:40",
-            "第八节\n15:50~16:30",
-            "第九节\n16:40~17:20"
-        ];
-
-        // 加载本地存储数据
-        function loadTimetable(week) {
-            const key = `timetable_week_${week}`;
-            const stored = localStorage.getItem(key);
-            return stored ? JSON.parse(stored) : JSON.parse(JSON.stringify(defaultTimetable));
+        // 从本地存储加载课表（增加校验逻辑）
+        function loadTimetable() {
+            const key = `timetable_week_${currentWeek}`;
+            const saved = localStorage.getItem(key);
+            
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    // 校验数据是否有效（必须有键值对）
+                    if (parsed && Object.keys(parsed).length > 0) {
+                        return parsed;
+                    }
+                } catch (e) {
+                    console.error("本地数据损坏，重置为默认");
+                }
+            }
+            return defaultTimetable;
         }
 
         // 保存课表到本地存储
-        function saveTimetable(week, data) {
-            const key = `timetable_week_${week}`;
-            localStorage.setItem(key, JSON.stringify(data));
+        function saveTimetable(data) {
+            localStorage.setItem(`timetable_week_${currentWeek}`, JSON.stringify(data));
         }
 
         // 渲染课表
         function renderTimetable() {
-            const data = loadTimetable(currentWeek);
             const tbody = document.getElementById('timetableBody');
+            const data = loadTimetable();
             tbody.innerHTML = '';
 
-            data.forEach((row, rowIndex) => {
-                const tr = document.createElement('tr');
-                const rowLabel = document.createElement('td');
-                rowLabel.className = 'border p-3 text-center font-medium bg-gray-50';
-                rowLabel.innerHTML = rowLabels[rowIndex].replace(/\n/g, '<br>');
-                tr.appendChild(rowLabel);
+            Object.keys(data).forEach(section => {
+                const row = document.createElement('tr');
+                
+                // 节次列
+                const sectionCell = document.createElement('td');
+                sectionCell.className = 'border border-gray-300 px-2 py-3 font-medium bg-gray-50 text-sm whitespace-pre-line';
+                sectionCell.textContent = section;
+                row.appendChild(sectionCell);
 
-                row.forEach((cell, colIndex) => {
-                    const td = document.createElement('td');
-                    td.className = 'border p-3 text-center course-cell';
-                    td.dataset.row = rowIndex;
-                    td.dataset.col = colIndex;
-                    td.innerHTML = cell.text.replace(/\n/g, '<br>');
+                // 周一到周五列
+                data[section].forEach((content, dayIndex) => {
+                    const cell = document.createElement('td');
+                    // 添加 data 属性用于拖拽识别
+                    cell.className = 'border border-gray-300 px-2 py-3 course-cell text-sm whitespace-pre-line';
+                    cell.dataset.section = section;
+                    cell.dataset.day = dayIndex;
                     
-                    // 修改：现在大课间也没有 colspan 了，所以都会走 else 分支，支持点击和拖拽
-                    if (cell.colspan) {
-                        td.colSpan = cell.colspan;
-                        td.className += ' bg-gray-100 font-bold';
+                    // 处理内容显示
+                    if (content && content.trim() !== "") {
+                        cell.innerHTML = content.replace(/\n/g, '<br>');
                     } else {
-                        td.draggable = true;
-                        td.addEventListener('click', () => openEditModal(td));
+                        cell.innerHTML = ""; // 留空，CSS 会显示“无课”
                     }
                     
-                    tr.appendChild(td);
+                    cell.addEventListener('click', () => editCell(cell));
+                    row.appendChild(cell);
                 });
-                tbody.appendChild(tr);
-            });
 
-            initDragAndDrop();
-            updateWeekInfo();
+                tbody.appendChild(row);
+            });
         }
 
-        // 初始化拖拽交换
-        function initDragAndDrop() {
-            // 选择所有没有 colspan 的格子（现在大课间也包含在内了）
-            const cells = document.querySelectorAll('.course-cell:not([colspan])');
-            let draggedCell = null;
+        // 编辑单元格内容
+        function editCell(cell) {
+            // 防止重复创建输入框
+            if (cell.querySelector('textarea')) return;
 
+            const currentText = cell.innerText; // 使用 innerText 获取纯文本
+            const input = document.createElement('textarea');
+            input.className = 'w-full h-full p-1 border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-200';
+            input.value = currentText;
+            input.style.resize = 'none';
+            input.style.height = '100%';
+            
+            cell.innerHTML = '';
+            cell.appendChild(input);
+            input.focus();
+
+            const saveEdit = () => {
+                const newText = input.value.trim();
+                // 更新视觉
+                if (newText) {
+                    cell.innerHTML = newText.replace(/\n/g, '<br>');
+                } else {
+                    cell.innerHTML = "";
+                }
+                
+                // 更新数据
+                const data = loadTimetable();
+                data[cell.dataset.section][cell.dataset.day] = newText;
+                saveTimetable(data);
+            };
+
+            input.addEventListener('blur', saveEdit);
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    input.blur();
+                }
+            });
+        }
+
+        // 设置拖拽排序 (原生 Drag API)
+        function setupDragAndDrop() {
+            const cells = document.querySelectorAll('.course-cell');
             cells.forEach(cell => {
-                cell.addEventListener('dragstart', (e) => {
-                    draggedCell = cell;
-                    cell.classList.add('sortable-ghost');
+                cell.setAttribute('draggable', 'true');
+                
+                cell.addEventListener('dragstart', function(e) {
+                    this.classList.add('dragging');
                     e.dataTransfer.effectAllowed = 'move';
+                    // 存储被拖拽元素的信息
+                    e.dataTransfer.setData('text/plain', JSON.stringify({
+                        section: this.dataset.section,
+                        day: this.dataset.day
+                    }));
                 });
 
-                cell.addEventListener('dragend', () => {
-                    cell.classList.remove('sortable-ghost');
-                    draggedCell = null;
+                cell.addEventListener('dragend', function() {
+                    this.classList.remove('dragging');
+                    document.querySelectorAll('.course-cell').forEach(c => c.classList.remove('drag-over'));
                 });
 
-                cell.addEventListener('dragover', (e) => {
-                    e.preventDefault();
+                cell.addEventListener('dragover', function(e) {
+                    e.preventDefault(); // 必须阻止默认行为才能允许 drop
                     e.dataTransfer.dropEffect = 'move';
+                    if (this !== document.querySelector('.dragging')) {
+                        this.classList.add('drag-over');
+                    }
                 });
 
-                cell.addEventListener('drop', (e) => {
+                cell.addEventListener('dragleave', function() {
+                    this.classList.remove('drag-over');
+                });
+
+                cell.addEventListener('drop', function(e) {
                     e.preventDefault();
-                    if (draggedCell && draggedCell !== cell) {
-                        const row1 = parseInt(draggedCell.dataset.row);
-                        const col1 = parseInt(draggedCell.dataset.col);
-                        const row2 = parseInt(cell.dataset.row);
-                        const col2 = parseInt(cell.dataset.col);
+                    this.classList.remove('drag-over');
+                    const draggingCell = document.querySelector('.dragging');
+                    
+                    if (draggingCell && draggingCell !== this) {
+                        // 1. 交换视觉内容 (innerHTML)
+                        const tempHTML = draggingCell.innerHTML;
+                        draggingCell.innerHTML = this.innerHTML;
+                        this.innerHTML = tempHTML;
+
+                        // 2. 交换底层数据
+                        const data = loadTimetable();
+                        const sourceSection = draggingCell.dataset.section;
+                        const sourceDay = draggingCell.dataset.day;
+                        const targetSection = this.dataset.section;
+                        const targetDay = this.dataset.day;
+
+                        const tempData = data[sourceSection][sourceDay];
+                        data[sourceSection][sourceDay] = data[targetSection][targetDay];
+                        data[targetSection][targetDay] = tempData;
                         
-                        const data = loadTimetable(currentWeek);
-                        const temp = data[row1][col1];
-                        data[row1][col1] = data[row2][col2];
-                        data[row2][col2] = temp;
-                        
-                        saveTimetable(currentWeek, data);
-                        renderTimetable();
+                        saveTimetable(data);
                     }
                 });
             });
         }
 
-        // 编辑弹窗
-        function openEditModal(cell) {
-            currentEditCell = cell;
-            const row = parseInt(cell.dataset.row);
-            const col = parseInt(cell.dataset.col);
-            const data = loadTimetable(currentWeek);
-            document.getElementById('editInput').value = data[row][col].text;
-            document.getElementById('editModal').classList.remove('hidden');
-        }
-
-        document.getElementById('saveEdit').addEventListener('click', () => {
-            if (currentEditCell) {
-                const row = parseInt(currentEditCell.dataset.row);
-                const col = parseInt(currentEditCell.dataset.col);
-                const data = loadTimetable(currentWeek);
-                data[row][col].text = document.getElementById('editInput').value;
-                saveTimetable(currentWeek, data);
-                renderTimetable();
-                document.getElementById('editModal').classList.add('hidden');
-                currentEditCell = null;
-            }
-        });
-
-        document.getElementById('cancelEdit').addEventListener('click', () => {
-            document.getElementById('editModal').classList.add('hidden');
-            currentEditCell = null;
-        });
-
-        // 周次切换
+        // 更新周次信息
         function updateWeekInfo() {
             const weekStart = new Date(startDate);
             weekStart.setDate(startDate.getDate() + currentWeek * 7);
             const weekEnd = new Date(weekStart);
-            weekEnd.setDate(weekStart.getDate() + 4);
-            
+            weekEnd.setDate(weekStart.getDate() + 4); // 只显示到周五
+
             const format = (date) => `${date.getMonth() + 1}月${date.getDate()}日`;
-            document.getElementById('weekInfo').textContent = `第${currentWeek + 1}周：${format(weekStart)} - ${format(weekEnd)}`;
+            document.getElementById('weekInfo').textContent = `第${currentWeek + 1}周 (${format(weekStart)} - ${format(weekEnd)})`;
         }
 
+        // 切换周次
         document.getElementById('prevWeek').addEventListener('click', () => {
             if (currentWeek > 0) {
                 currentWeek--;
                 renderTimetable();
+                setupDragAndDrop();
+                updateWeekInfo();
+            } else {
+                alert("已经是第一周了");
             }
         });
 
         document.getElementById('nextWeek').addEventListener('click', () => {
             currentWeek++;
             renderTimetable();
+            setupDragAndDrop();
+            updateWeekInfo();
         });
 
-        // 导出 PDF 功能
-        document.getElementById('exportPdf').addEventListener('click', async () => {
-            const btn = document.getElementById('exportPdf');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '生成中...';
-            btn.disabled = true;
-
-            try {
-                const element = document.getElementById('timetable');
-                
-                const canvas = await html2canvas(element, {
-                    scale: 2,
-                    backgroundColor: '#ffffff',
-                    useCORS: true
-                });
-
-                const imgData = canvas.toDataURL('image/png');
-                const pdf = new jsPDF('l', 'mm', 'a4');
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = pdf.internal.pageSize.getHeight();
-                
-                const imgWidth = pdfWidth - 20;
-                const imgHeight = (canvas.height * imgWidth) / canvas.width;
-                
-                let finalHeight = imgHeight;
-                let finalWidth = imgWidth;
-                
-                if (imgHeight > pdfHeight - 20) {
-                    const ratio = (pdfHeight - 20) / imgHeight;
-                    finalHeight = pdfHeight - 20;
-                    finalWidth = imgWidth * ratio;
-                }
-
-                pdf.addImage(imgData, 'PNG', 10, 10, finalWidth, finalHeight);
-                pdf.save(`课表_第${currentWeek + 1}周.pdf`);
-            } catch (error) {
-                console.error('导出失败:', error);
-                alert('导出 PDF 失败，请查看控制台错误信息');
-            } finally {
-                btn.innerHTML = originalText;
-                btn.disabled = false;
+        // 重置数据
+        document.getElementById('resetData').addEventListener('click', () => {
+            if(confirm('确定要重置当前周的课表为默认状态吗？此操作不可撤销。')) {
+                localStorage.removeItem(`timetable_week_${currentWeek}`);
+                renderTimetable();
+                setupDragAndDrop();
+                alert('已重置为默认课表');
             }
         });
 
-        // 初始化
-        renderTimetable();
+        // 导出 PDF (修复版)
+        document.getElementById('exportPdf').addEventListener('click', () => {
+            const element = document.getElementById('timetableContainer');
+            const originalOverflow = element.style.overflow;
+            const originalShadow = element.style.boxShadow;
+            
+            // 1. 临时修改样式以捕获完整内容
+            element.style.overflow = 'visible'; // 关键：允许内容溢出以便截图
+            element.style.boxShadow = 'none';   // 去除阴影让 PDF 更干净
+            
+            // 临时移除所有单元格的 hover 效果，避免截图时有背景色
+            document.querySelectorAll('.course-cell').forEach(c => c.style.backgroundColor = 'white');
+
+            const opt = {
+                margin: 10,
+                filename: `课表_第${currentWeek + 1}周.pdf`,
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { 
+                    scale: 2,
+                    useCORS: true,
+                    logging: false
+                },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
+            };
+
+            // 显示加载提示
+            const btn = document.getElementById('exportPdf');
+            const originalText = btn.textContent;
+            btn.textContent = '生成中...';
+            btn.disabled = true;
+
+            html2pdf().set(opt).from(element).save().then(() => {
+                // 2. 恢复样式
+                element.style.overflow = originalOverflow;
+                element.style.boxShadow = originalShadow;
+                document.querySelectorAll('.course-cell').forEach(c => c.style.backgroundColor = '');
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }).catch(err => {
+                console.error(err);
+                alert('导出失败，请检查控制台或尝试缩小浏览器窗口后重试');
+                btn.textContent = originalText;
+                btn.disabled = false;
+            });
+        });
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', init);
     </script>
 </body>
 </html>
-
