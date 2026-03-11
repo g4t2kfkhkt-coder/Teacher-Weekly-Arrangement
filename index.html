@@ -194,29 +194,33 @@
     <script>
         // --- 1. 数据配置 ---
         const START_DATE = new Date(2026, 2, 9); // 2026年3月9日 (月份从0开始，2代表3月)
-        const STORAGE_KEY = 'zhang_schedule_data_v1';
+        // 修改了 Key 版本号，强制清除旧缓存
+        const STORAGE_KEY = 'zhang_schedule_data_v2_FIXED'; 
         
-        // 默认课表数据 (根据图片转录)
-        // 格式：{ day: 1-5 (周一到周五), period: 1-8, content: "课程名", sub: "班级/备注" }
+        // 默认课表数据 (根据图片严格转录)
         const DEFAULT_SCHEDULE = [
+            // 周一
             { d: 1, p: 1, c: "语文", s: "六9班" },
-            { d: 4, p: 1, c: "语文", s: "六14班" },
-            
-            { d: 2, p: 2, c: "语文", s: "六14班" },
-            { d: 3, p: 2, c: "语文", s: "六9班" },
-            { d: 5, p: 2, c: "语文", s: "六9班" },
-
             { d: 1, p: 3, c: "语文", s: "六14班" },
-            { d: 2, p: 3, c: "语文", s: "六9班" },
-            { d: 4, p: 3, c: "语文", s: "六14班" },
-
-            { d: 4, p: 4, c: "语文", s: "六9班" },
-            { d: 5, p: 4, c: "语文", s: "六14班" },
-
             { d: 1, p: 5, c: "班团队会", s: "六14班" },
-            { d: 3, p: 5, c: "语文", s: "六14班" },
+            
+            // 周二
+            { d: 2, p: 2, c: "语文", s: "六14班" },
+            { d: 2, p: 3, c: "语文", s: "六9班" },
 
-            { d: 3, p: 7, c: "语文", s: "六9班" }
+            // 周三
+            { d: 3, p: 2, c: "语文", s: "六9班" },
+            { d: 3, p: 5, c: "语文", s: "六14班" },
+            { d: 3, p: 7, c: "语文", s: "六9班" },
+
+            // 周四
+            { d: 4, p: 1, c: "语文", s: "六14班" },
+            { d: 4, p: 3, c: "语文", s: "六14班" },
+            { d: 4, p: 4, c: "语文", s: "六9班" },
+
+            // 周五
+            { d: 5, p: 2, c: "语文", s: "六9班" },
+            { d: 5, p: 4, c: "语文", s: "六14班" }
         ];
 
         // 课表结构定义（行）
@@ -236,7 +240,7 @@
 
         // --- 2. 状态管理 ---
         let currentWeekOffset = 0; // 相对于起始日期的周数偏移
-        let allData = {}; // 存储所有周的数据 { "week_0": [...], "week_1": [...] }
+        let allData = {}; // 存储所有周的数据
         let selectedCellId = null; // 用于点击互换
 
         // --- 3. 初始化 ---
@@ -250,6 +254,9 @@
             const stored = localStorage.getItem(STORAGE_KEY);
             if (stored) {
                 allData = JSON.parse(stored);
+                // 兼容旧版周数偏移
+                const savedOffset = localStorage.getItem('zhang_current_week_offset');
+                if (savedOffset) currentWeekOffset = parseInt(savedOffset);
             } else {
                 // 初始化第一周数据
                 allData["week_0"] = JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
@@ -259,6 +266,7 @@
 
         function saveData() {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(allData));
+            localStorage.setItem('zhang_current_week_offset', currentWeekOffset);
         }
 
         function getCurrentWeekKey() {
@@ -268,8 +276,7 @@
         function getWeekData() {
             const key = getCurrentWeekKey();
             if (!allData[key]) {
-                // 如果该周没有数据，复制默认模板（或者复制上一周，这里简单处理为默认模板）
-                // 为了体验更好，如果上一周有数据，可以复制上一周，否则用默认
+                // 如果该周没有数据，复制默认模板
                 allData[key] = JSON.parse(JSON.stringify(DEFAULT_SCHEDULE)); 
             }
             return allData[key];
@@ -319,7 +326,7 @@
                         td.addEventListener('dragstart', handleDragStart);
                         td.addEventListener('dragover', handleDragOver);
                         td.addEventListener('drop', handleDrop);
-                        td.addEventListener('blur', handleEditBlur, true); // 捕获阶段监听 blur 以保存编辑
+                        td.addEventListener('blur', handleEditBlur, true); 
 
                         tr.appendChild(td);
                     }
@@ -328,16 +335,12 @@
             });
         }
 
-        // --- 5. 交互逻辑 (编辑、拖拽、互换) ---
+        // --- 5. 交互逻辑 ---
 
-        // 编辑保存
         function handleEditBlur(e) {
             const td = e.target.closest('td');
             if (!td || !td.classList.contains('editable-cell')) return;
             
-            // 简单的解析 HTML 内容回存到数据
-            // 注意：这里为了简化，直接读取 innerHTML 结构，实际生产环境建议用更稳健的数据绑定
-            // 但为了单文件简洁，我们直接操作 DOM 并更新 JSON
             const id = td.dataset.id;
             const day = parseInt(td.dataset.day);
             const period = parseInt(td.dataset.period);
@@ -349,7 +352,6 @@
             const newInfo = infoSpan ? infoSpan.innerText : "";
 
             if (!newContent && !newInfo) {
-                // 如果清空了，删除数据
                 const weekKey = getCurrentWeekKey();
                 allData[weekKey] = allData[weekKey].filter(item => !(item.d === day && item.p === period));
             } else {
@@ -371,24 +373,19 @@
             }
         }
 
-        // 点击互换逻辑
         function handleCellClick(e) {
-            // 如果正在编辑中（有光标），不触发互换
             if (document.activeElement.isContentEditable) return;
 
             const td = e.currentTarget;
             const id = td.dataset.id;
 
             if (selectedCellId === null) {
-                // 第一次点击
                 selectedCellId = id;
                 td.classList.add('selected');
             } else if (selectedCellId === id) {
-                // 取消选择
                 selectedCellId = null;
                 td.classList.remove('selected');
             } else {
-                // 第二次点击，执行互换
                 swapCells(selectedCellId, id);
                 selectedCellId = null;
                 document.querySelectorAll('.selected').forEach(el => el.classList.remove('selected'));
@@ -401,12 +398,10 @@
             
             if (!el1 || !el2) return;
 
-            // 交换 HTML 内容
             const tempHtml = el1.innerHTML;
             el1.innerHTML = el2.innerHTML;
             el2.innerHTML = tempHtml;
 
-            // 交换数据模型
             const d1 = parseInt(el1.dataset.day), p1 = parseInt(el1.dataset.period);
             const d2 = parseInt(el2.dataset.day), p2 = parseInt(el2.dataset.period);
 
@@ -416,22 +411,16 @@
             const item1 = weekData.find(d => d.d === d1 && d.p === p1);
             const item2 = weekData.find(d => d.d === d2 && d.p === p2);
 
-            // 构造临时对象交换
             const tempItem = item1 ? { ...item1 } : null;
             
             if (item1 && item2) {
                 item1.c = item2.c; item1.s = item2.s;
                 item2.c = tempItem.c; item2.s = tempItem.s;
             } else if (item1 && !item2) {
-                // 1有数据，2没数据 -> 1移到2，1清空
                 weekData.push({ d: d2, p: p2, c: item1.c, s: item1.s });
-                item1.c = ""; item1.s = ""; // 标记为空，稍后清理或保留空对象
-                // 实际上更好的做法是直接删除 item1 对应的条目，但为了保持逻辑简单，这里设为空
-                // 修正：直接过滤掉空的
                 allData[weekKey] = weekData.filter(d => !(d.d === d1 && d.p === p1));
             } else if (!item1 && item2) {
-                // 1没数据，2有数据 -> 2移到1，2清空
-                weekData.push({ d: d1, p: p1, c: item2.c, s:2.s });
+                weekData.push({ d: d1, p: p1, c: item2.c, s: item2.s });
                 allData[weekKey] = weekData.filter(d => !(d.d === d2 && d.p === p2));
             }
             
@@ -444,11 +433,10 @@
         function handleDragStart(e) {
             draggedId = e.currentTarget.dataset.id;
             e.dataTransfer.effectAllowed = 'move';
-            // 设置一个透明的拖拽图像或者默认
         }
 
         function handleDragOver(e) {
-            e.preventDefault(); // 必须阻止默认行为才能允许 drop
+            e.preventDefault();
             e.dataTransfer.dropEffect = 'move';
         }
 
@@ -466,7 +454,7 @@
             currentWeekOffset += delta;
             renderTable();
             updateWeekInfo();
-            saveData(); // 保存当前周次状态，以便刷新后记住
+            saveData();
         }
 
         function resetCurrentWeek() {
@@ -483,23 +471,15 @@
             currentDate.setDate(START_DATE.getDate() + (currentWeekOffset * 7));
             
             const endOfWeek = new Date(currentDate);
-            endOfWeek.setDate(currentDate.getDate() + 4); // 周五
+            endOfWeek.setDate(currentDate.getDate() + 4); 
 
             const format = (d) => `${d.getMonth()+1}月${d.getDate()}日`;
             
             const weekNum = currentWeekOffset + 1;
             document.getElementById('weekInfo').textContent = 
                 `第 ${weekNum} 周 (${format(currentDate)} - ${format(endOfWeek)})`;
-            
-            // 保存当前的周偏移量
-            localStorage.setItem('zhang_current_week_offset', currentWeekOffset);
         }
 
-        // 加载保存的周偏移量
-        const savedOffset = localStorage.getItem('zhang_current_week_offset');
-        if (savedOffset) currentWeekOffset = parseInt(savedOffset);
-
-        // --- 7. 工具函数 ---
         function toChineseNum(num) {
             const chars = ['一', '二', '三', '四', '五', '六', '七', '八'];
             return chars[num - 1];
@@ -517,7 +497,6 @@
             html2pdf().set(opt).from(element).save();
         }
 
-        // 启动
         init();
 
     </script>
