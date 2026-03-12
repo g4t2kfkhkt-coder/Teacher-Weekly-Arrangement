@@ -16,25 +16,26 @@
             text-align: center; /* 强制居中 */
             vertical-align: middle;
             white-space: pre-wrap; /* 保留换行符 */
-            word-break: break-word; /* 防止长单词溢出 */
+            word-break: break-word; 
             line-height: 1.4;
             padding: 4px;
+            user-select: none; /* 防止拖拽时选中文字 */
         }
         .course-cell:hover { background-color: #f3f4f6; }
         
         /* 修改过的单元格样式 (红色加粗) */
         .course-cell.modified {
-            color: #dc2626; /* red-600 */
+            color: #dc2626; 
             font-weight: bold;
-            background-color: #fef2f2; /* 轻微红色背景提示 */
+            background-color: #fef2f2; 
         }
         .course-cell.modified:hover {
             background-color: #fee2e2;
         }
 
         /* 拖拽样式 */
-        .dragging { opacity: 0.5; border: 2px dashed #3b82f6; }
-        .drag-over { background-color: #dbeafe; }
+        .dragging { opacity: 0.5; border: 2px dashed #3b82f6; background-color: #eff6ff; }
+        .drag-over { background-color: #dbeafe; border: 2px dashed #3b82f6; }
 
         /* 加载遮罩 */
         #loadingOverlay { 
@@ -47,12 +48,6 @@
         .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
         .status-online { background-color: #22c55e; }
         .status-offline { background-color: #ef4444; }
-
-        /* 打印/PDF 专用优化 */
-        @media print {
-            body { -webkit-print-color-adjust: exact; }
-            .no-print { display: none; }
-        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen p-4 md:p-8">
@@ -98,7 +93,7 @@
         </div>
         
         <div class="mt-4 text-sm text-gray-500 text-center no-print">
-            💡 点击单元格编辑（自动换行），拖拽交换课程。<span class="text-red-500 font-bold">红色加粗</span>表示已修改内容。
+            💡 点击单元格编辑，<span class="font-bold text-blue-600">拖拽可交换课程</span>。<span class="text-red-500 font-bold">红色加粗</span>表示已修改内容。
         </div>
     </div>
 
@@ -137,8 +132,8 @@
             updateWeekInfo();
             hideLoading();
             
-            // 全局绑定拖拽事件，避免重复绑定
-            setupGlobalDragAndDrop();
+            // 绑定拖拽事件
+            setupDragAndDrop();
         }
 
         // 检查 API 连接
@@ -146,10 +141,8 @@
             const statusDot = document.getElementById('statusDot');
             const statusText = document.getElementById('statusText');
             try {
-                // 使用 AbortController 防止请求无限挂起
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 3000);
-                
                 const response = await fetch('/api/timetable?week=0', { signal: controller.signal });
                 clearTimeout(timeoutId);
                 
@@ -162,17 +155,25 @@
             } catch (error) {
                 statusDot.className = 'status-dot status-offline';
                 statusText.textContent = '连接失败 (离线模式)';
-                console.log('离线模式运行');
             }
         }
 
-        // 文本格式化：每 N 个字符换行
-        function formatText(text, limit = 8) {
+        // 文本格式化：保留原有换行，仅对超长单行进行强制换行
+        function formatText(text, limit = 10) {
             if (!text) return "";
-            // 先移除原有的换行符，重新格式化，避免混乱
-            const cleanText = text.replace(/\n/g, '');
-            const regex = new RegExp(`.{1,${limit}}`, 'g');
-            return cleanText.match(regex)?.join('\n') || "";
+            // 1. 按原有换行符分割
+            const lines = text.split('\n');
+            // 2. 处理每一行
+            const processedLines = lines.map(line => {
+                if (line.length > limit) {
+                    // 如果单行超过限制，每 limit 个字切分一次
+                    const regex = new RegExp(`.{1,${limit}}`, 'g');
+                    return line.match(regex).join('\n');
+                }
+                return line;
+            });
+            // 3. 重新拼接
+            return processedLines.join('\n');
         }
 
         // 加载并渲染
@@ -181,26 +182,21 @@
             try {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 5000);
-
                 const response = await fetch(`/api/timetable?week=${currentWeek}`, { signal: controller.signal });
                 clearTimeout(timeoutId);
 
                 let data = await response.json();
                 
                 if (!data || Object.keys(data).length === 0) {
-                    // 如果没有数据，使用默认数据的深拷贝
                     data = JSON.parse(JSON.stringify(defaultTimetable));
-                    // 注意：这里不自动保存默认数据，除非用户修改，保持静默
                 }
                 
                 currentData = data;
                 renderTimetable(data);
             } catch (error) {
                 console.error('加载失败:', error);
-                // 失败时使用默认数据渲染，保证界面不白屏
                 currentData = JSON.parse(JSON.stringify(defaultTimetable));
                 renderTimetable(currentData);
-                alert('加载云端数据失败，已显示本地默认数据。');
             } finally {
                 hideLoading();
             }
@@ -211,7 +207,6 @@
             if (isSaving) return;
             isSaving = true;
             
-            // 不显示全屏 loading，只在状态栏提示，体验更好
             const statusText = document.getElementById('statusText');
             const originalText = statusText.textContent;
             statusText.textContent = '正在保存...';
@@ -231,24 +226,20 @@
                 
                 if (!response.ok) {
                     const error = await response.json().catch(() => ({}));
-                    if (response.status === 401) {
-                        alert('认证失败！请检查 API_TOKEN');
-                    } else {
-                        throw new Error(error.error || '保存失败');
-                    }
+                    if (response.status === 401) alert('认证失败！');
+                    else throw new Error(error.error || '保存失败');
                 }
                 statusText.textContent = '已保存';
                 setTimeout(() => statusText.textContent = originalText, 2000);
             } catch (error) {
                 console.error('保存失败:', error);
                 statusText.textContent = '保存失败';
-                // 保存失败不阻塞用户操作
             } finally {
                 isSaving = false;
             }
         }
 
-        // 渲染课表 (核心逻辑修改)
+        // 渲染课表
         function renderTimetable(data) {
             const tbody = document.getElementById('timetableBody');
             tbody.innerHTML = '';
@@ -265,29 +256,36 @@
                 // 天数列
                 data[section].forEach((content, dayIndex) => {
                     const cell = document.createElement('td');
-                    // 基础样式
                     cell.className = 'border border-gray-300 px-2 py-3 course-cell text-sm';
                     cell.dataset.section = section;
                     cell.dataset.day = dayIndex;
+                    
+                    // 开启拖拽
+                    cell.setAttribute('draggable', 'true');
                     
                     // 获取默认值进行对比
                     const defaultValue = defaultTimetable[section]?.[dayIndex] || "";
                     const currentValue = content || "";
 
-                    // 关键逻辑：如果当前值与默认值不同，添加红色加粗样式
+                    // 样式判断：如果当前值与默认值不同，添加红色加粗
                     if (currentValue.trim() !== defaultValue.trim()) {
                         cell.classList.add('modified');
                     }
                     
-                    // 显示时应用自动换行格式化
+                    // 显示内容：应用智能换行
                     if (currentValue && currentValue.trim() !== "") {
-                        cell.innerHTML = formatText(currentValue).replace(/\n/g, '<br>');
+                        const formatted = formatText(currentValue);
+                        cell.innerHTML = formatted.replace(/\n/g, '<br>');
                     } else {
                         cell.innerHTML = "";
                     }
                     
-                    // 绑定点击编辑事件
-                    cell.addEventListener('click', () => editCell(cell));
+                    // 绑定点击编辑
+                    cell.addEventListener('click', (e) => {
+                        // 如果正在拖拽，不触发编辑
+                        if(cell.classList.contains('dragging')) return;
+                        editCell(cell);
+                    });
                     row.appendChild(cell);
                 });
                 
@@ -299,12 +297,12 @@
         function editCell(cell) {
             if (cell.querySelector('textarea')) return;
             
-            // 获取原始数据（去除格式化换行符，方便编辑）
+            // 获取原始数据（不带格式化换行，方便编辑）
             const rawText = currentData[cell.dataset.section][cell.dataset.day] || "";
             
             const input = document.createElement('textarea');
             input.className = 'w-full h-full p-1 border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-200 text-center text-sm resize-none';
-            input.value = rawText; // 编辑时显示原始内容，不带强制换行
+            input.value = rawText; 
             input.style.height = '100%';
             input.style.minHeight = '60px';
             
@@ -315,21 +313,13 @@
             const saveEdit = async () => {
                 const newText = input.value.trim();
                 
-                // 保存时应用自动换行逻辑
-                const formattedText = formatText(newText);
-                
                 // 更新数据模型
-                currentData[cell.dataset.section][cell.dataset.day] = newText; // 存原始数据
+                currentData[cell.dataset.section][cell.dataset.day] = newText;
                 
-                // 重新渲染整个表格以更新样式（红色/非红色）
-                // 为了性能，也可以只更新当前单元格，但重渲染能保证状态同步最准确
+                // 重新渲染以更新样式和换行
                 renderTimetable(currentData);
                 
-                // 异步保存
                 await saveData(currentData);
-                
-                // 恢复拖拽监听（因为 DOM 重绘了）
-                // 注意：setupGlobalDragAndDrop 是委托在 tbody 上的，所以不需要重新绑定
             };
 
             input.addEventListener('blur', saveEdit);
@@ -341,73 +331,82 @@
             });
         }
 
-        // 全局拖拽设置 (使用事件委托优化性能)
-        function setupGlobalDragAndDrop() {
+        // 拖拽功能设置
+        function setupDragAndDrop() {
             const tbody = document.getElementById('timetableBody');
             
-            tbody.addEventListener('dragstart', function(e) {
-                if (e.target.classList.contains('course-cell')) {
-                    dragSrcEl = e.target;
-                    e.target.classList.add('dragging');
-                    e.dataTransfer.effectAllowed = 'move';
-                    // 设置拖拽数据，虽然这里主要靠 DOM 操作，但这是标准做法
-                    e.dataTransfer.setData('text/html', e.target.innerHTML);
-                }
-            });
+            // 使用事件委托处理拖拽，性能更好且不需要每次渲染都绑定
+            tbody.addEventListener('dragstart', handleDragStart);
+            tbody.addEventListener('dragover', handleDragOver);
+            tbody.addEventListener('dragleave', handleDragLeave);
+            tbody.addEventListener('dragend', handleDragEnd);
+            tbody.addEventListener('drop', handleDrop);
+        }
 
-            tbody.addEventListener('dragover', function(e) {
-                e.preventDefault(); // 必须阻止默认行为才能允许 drop
-                const target = e.target.closest('.course-cell');
-                if (target && target !== dragSrcEl) {
-                    target.classList.add('drag-over');
-                }
-                return false;
-            });
+        function handleDragStart(e) {
+            const cell = e.target.closest('.course-cell');
+            if (cell) {
+                dragSrcEl = cell;
+                cell.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                // 必须设置数据，否则某些浏览器不触发 drop
+                e.dataTransfer.setData('text/plain', ''); 
+            }
+        }
 
-            tbody.addEventListener('dragleave', function(e) {
-                const target = e.target.closest('.course-cell');
-                if (target) {
-                    target.classList.remove('drag-over');
-                }
-            });
+        function handleDragOver(e) {
+            e.preventDefault(); // 必须阻止默认行为
+            const cell = e.target.closest('.course-cell');
+            if (cell && cell !== dragSrcEl) {
+                cell.classList.add('drag-over');
+            }
+            return false;
+        }
 
-            tbody.addEventListener('dragend', function(e) {
-                if (dragSrcEl) {
-                    dragSrcEl.classList.remove('dragging');
-                }
-                document.querySelectorAll('.course-cell').forEach(c => c.classList.remove('drag-over'));
-                dragSrcEl = null;
-            });
+        function handleDragLeave(e) {
+            const cell = e.target.closest('.course-cell');
+            if (cell) {
+                cell.classList.remove('drag-over');
+            }
+        }
 
-            tbody.addEventListener('drop', async function(e) {
-                e.stopPropagation();
-                const target = e.target.closest('.course-cell');
+        function handleDragEnd(e) {
+            if (dragSrcEl) {
+                dragSrcEl.classList.remove('dragging');
+            }
+            document.querySelectorAll('.course-cell').forEach(c => c.classList.remove('drag-over'));
+            dragSrcEl = null;
+        }
+
+        async function handleDrop(e) {
+            e.stopPropagation();
+            const targetCell = e.target.closest('.course-cell');
+            
+            if (dragSrcEl && targetCell && dragSrcEl !== targetCell) {
+                targetCell.classList.remove('drag-over');
                 
-                if (dragSrcEl && target && dragSrcEl !== target) {
-                    target.classList.remove('drag-over');
-                    
-                    // 交换 DOM 内容
-                    const tempHTML = dragSrcEl.innerHTML;
-                    dragSrcEl.innerHTML = target.innerHTML;
-                    target.innerHTML = tempHTML;
+                // 1. 交换 DOM 内容 (视觉交换)
+                const tempHTML = dragSrcEl.innerHTML;
+                dragSrcEl.innerHTML = targetCell.innerHTML;
+                targetCell.innerHTML = tempHTML;
 
-                    // 交换数据模型
-                    const sSec = dragSrcEl.dataset.section;
-                    const sDay = dragSrcEl.dataset.day;
-                    const tSec = target.dataset.section;
-                    const tDay = target.dataset.day;
-                    
-                    const temp = currentData[sSec][sDay];
-                    currentData[sSec][sDay] = currentData[tSec][tDay];
-                    currentData[tSec][tDay] = temp;
-                    
-                    // 重新渲染以更新红色样式
-                    renderTimetable(currentData);
-                    
-                    await saveData(currentData);
-                }
-                return false;
-            });
+                // 2. 交换数据模型 (数据交换)
+                const sSec = dragSrcEl.dataset.section;
+                const sDay = dragSrcEl.dataset.day;
+                const tSec = targetCell.dataset.section;
+                const tDay = targetCell.dataset.day;
+                
+                const tempData = currentData[sSec][sDay];
+                currentData[sSec][sDay] = currentData[tSec][tDay];
+                currentData[tSec][tDay] = tempData;
+                
+                // 3. 重新渲染以更新红色样式状态
+                renderTimetable(currentData);
+                
+                // 4. 保存
+                await saveData(currentData);
+            }
+            return false;
         }
 
         // 更新周次信息
@@ -431,7 +430,6 @@
         });
 
         document.getElementById('nextWeek').addEventListener('click', async () => {
-            // 防止快速点击导致请求堆积
             if (isSaving) return; 
             currentWeek++;
             await loadAndRender();
@@ -448,40 +446,26 @@
             }
         });
 
-        // 导出 PDF (优化为单页横向)
+        // 导出 PDF
         document.getElementById('exportPdf').addEventListener('click', () => {
             const element = document.getElementById('timetableContainer');
-            
-            // 临时移除圆角和阴影，让 PDF 更整洁
             const originalClass = element.className;
             element.className = 'bg-white p-2'; 
 
             const opt = {
-                margin: [5, 5, 5, 5], // 上下左右边距 mm
+                margin: [5, 5, 5, 5],
                 filename: `课表_第${currentWeek + 1}周.pdf`,
                 image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { 
-                    scale: 2, // 提高清晰度
-                    useCORS: true,
-                    letterRendering: true
-                },
-                jsPDF: { 
-                    unit: 'mm', 
-                    format: 'a4', 
-                    orientation: 'landscape' // 强制横向
-                },
-                pagebreak: { mode: 'avoid-all' } // 尽量避免分页
+                html2canvas: { scale: 2, useCORS: true, letterRendering: true },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
+                pagebreak: { mode: 'avoid-all' }
             };
             
-            // 计算内容高度，动态调整 scale 以确保在一页内 (可选高级优化)
-            // 这里使用固定配置，通常 A4 横向足够容纳此表格
-            
             html2pdf().set(opt).from(element).save().then(() => {
-                element.className = originalClass; // 恢复样式
+                element.className = originalClass;
             });
         });
 
-        // 辅助函数
         function showLoading(text) {
             const overlay = document.getElementById('loadingOverlay');
             document.getElementById('loadingText').textContent = text;
@@ -492,7 +476,6 @@
             document.getElementById('loadingOverlay').style.display = 'none';
         }
 
-        // 页面加载
         document.addEventListener('DOMContentLoaded', init);
     </script>
 </body>
