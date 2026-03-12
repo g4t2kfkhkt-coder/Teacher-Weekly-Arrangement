@@ -13,17 +13,17 @@
             cursor: pointer; 
             transition: all 0.2s; 
             position: relative; 
-            text-align: center; /* 强制居中 */
+            text-align: center; 
             vertical-align: middle;
-            white-space: pre-wrap; /* 保留换行符 */
+            white-space: pre-wrap; 
             word-break: break-word; 
             line-height: 1.4;
             padding: 4px;
-            user-select: none; /* 防止拖拽时选中文字 */
+            user-select: none; 
         }
         .course-cell:hover { background-color: #f3f4f6; }
         
-        /* 修改过的单元格样式 (红色加粗) */
+        /* 修改过的单元格样式 */
         .course-cell.modified {
             color: #dc2626; 
             font-weight: bold;
@@ -44,10 +44,29 @@
             display: flex; justify-content: center; align-items: center; flex-direction: column; 
         }
         
-        /* 状态点 */
         .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
         .status-online { background-color: #22c55e; }
         .status-offline { background-color: #ef4444; }
+
+        /* ================= 新增：PDF 导出专用压缩样式 ================= */
+        /* 当容器添加此类时，强制缩小字体和间距，确保能塞进一页 */
+        .pdf-export-mode {
+            transform: scale(0.9); /* 整体缩小 10% */
+            transform-origin: top left;
+            width: 111%; /* 补偿缩小后的宽度，保持填满 */
+        }
+        .pdf-export-mode table {
+            font-size: 10px !important; /* 强制小字体 */
+        }
+        .pdf-export-mode th, 
+        .pdf-export-mode td {
+            padding: 2px 1px !important; /* 极小内边距 */
+            min-height: 45px !important; /* 减小最小高度 */
+            line-height: 1.2 !important;
+        }
+        .pdf-export-mode .section-title {
+            font-size: 9px !important;
+        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen p-4 md:p-8">
@@ -71,11 +90,12 @@
                 <span id="weekInfo" class="px-4 py-2 bg-white border border-gray-300 rounded text-lg font-medium text-gray-700 min-w-[200px] text-center"></span>
                 <button id="nextWeek" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition shadow">下一周 →</button>
                 <button id="exportPdf" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition shadow">📄 导出 PDF</button>
-                <button id="resetData" class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition shadow">🔄 重置本周</button>
+                <button id="resetData" class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition shadow"> 重置本周</button>
             </div>
         </div>
 
         <!-- 课表容器 -->
+        <!-- 注意：这里移除了 p-4，改为内部控制，方便导出时调整 -->
         <div id="timetableContainer" class="overflow-hidden bg-white rounded-lg shadow-md p-4">
             <table class="w-full border-collapse table-fixed">
                 <thead>
@@ -98,11 +118,8 @@
     </div>
 
     <script>
-        // ================= 配置区域 =================
         const API_TOKEN = "zby20010117";
-        // ===========================================
 
-        // 默认课表数据 (作为对比基准)
         const defaultTimetable = {
             "早读": ["语文\n六 14 班", "语文\n六 9 班", "语文\n六 9 班", "", "语文\n六 14 班"],
             "第一节\n8:00~8:40": ["语文\n六 9 班", "", "", "语文\n六 14 班", ""],
@@ -125,18 +142,14 @@
         let isSaving = false;
         let dragSrcEl = null;
 
-        // 初始化
         async function init() {
             await checkConnection();
             await loadAndRender();
             updateWeekInfo();
             hideLoading();
-            
-            // 绑定拖拽事件
             setupDragAndDrop();
         }
 
-        // 检查 API 连接
         async function checkConnection() {
             const statusDot = document.getElementById('statusDot');
             const statusText = document.getElementById('statusText');
@@ -145,38 +158,29 @@
                 const timeoutId = setTimeout(() => controller.abort(), 3000);
                 const response = await fetch('/api/timetable?week=0', { signal: controller.signal });
                 clearTimeout(timeoutId);
-                
                 if (response.ok) {
                     statusDot.className = 'status-dot status-online';
                     statusText.textContent = '云端已连接';
-                } else {
-                    throw new Error('API error');
-                }
+                } else { throw new Error('API error'); }
             } catch (error) {
                 statusDot.className = 'status-dot status-offline';
                 statusText.textContent = '连接失败 (离线模式)';
             }
         }
 
-        // 文本格式化：保留原有换行，仅对超长单行进行强制换行
         function formatText(text, limit = 10) {
             if (!text) return "";
-            // 1. 按原有换行符分割
             const lines = text.split('\n');
-            // 2. 处理每一行
             const processedLines = lines.map(line => {
                 if (line.length > limit) {
-                    // 如果单行超过限制，每 limit 个字切分一次
                     const regex = new RegExp(`.{1,${limit}}`, 'g');
                     return line.match(regex).join('\n');
                 }
                 return line;
             });
-            // 3. 重新拼接
             return processedLines.join('\n');
         }
 
-        // 加载并渲染
         async function loadAndRender() {
             showLoading('正在加载课表...');
             try {
@@ -184,13 +188,10 @@
                 const timeoutId = setTimeout(() => controller.abort(), 5000);
                 const response = await fetch(`/api/timetable?week=${currentWeek}`, { signal: controller.signal });
                 clearTimeout(timeoutId);
-
                 let data = await response.json();
-                
                 if (!data || Object.keys(data).length === 0) {
                     data = JSON.parse(JSON.stringify(defaultTimetable));
                 }
-                
                 currentData = data;
                 renderTimetable(data);
             } catch (error) {
@@ -202,28 +203,18 @@
             }
         }
 
-        // 保存数据
         async function saveData(data) {
             if (isSaving) return;
             isSaving = true;
-            
             const statusText = document.getElementById('statusText');
             const originalText = statusText.textContent;
             statusText.textContent = '正在保存...';
-            
             try {
                 const response = await fetch('/api/timetable', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${API_TOKEN}`
-                    },
-                    body: JSON.stringify({
-                        week: currentWeek,
-                        data: data
-                    })
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${API_TOKEN}` },
+                    body: JSON.stringify({ week: currentWeek, data: data })
                 });
-                
                 if (!response.ok) {
                     const error = await response.json().catch(() => ({}));
                     if (response.status === 401) alert('认证失败！');
@@ -239,40 +230,31 @@
             }
         }
 
-        // 渲染课表
         function renderTimetable(data) {
             const tbody = document.getElementById('timetableBody');
             tbody.innerHTML = '';
             
             Object.keys(data).forEach(section => {
                 const row = document.createElement('tr');
-                
-                // 节次列
                 const sectionCell = document.createElement('td');
-                sectionCell.className = 'border border-gray-300 px-2 py-3 font-medium bg-gray-50 text-sm whitespace-pre-line text-center';
+                sectionCell.className = 'border border-gray-300 px-2 py-3 font-medium bg-gray-50 text-sm whitespace-pre-line text-center section-title';
                 sectionCell.textContent = section;
                 row.appendChild(sectionCell);
 
-                // 天数列
                 data[section].forEach((content, dayIndex) => {
                     const cell = document.createElement('td');
                     cell.className = 'border border-gray-300 px-2 py-3 course-cell text-sm';
                     cell.dataset.section = section;
                     cell.dataset.day = dayIndex;
-                    
-                    // 开启拖拽
                     cell.setAttribute('draggable', 'true');
                     
-                    // 获取默认值进行对比
                     const defaultValue = defaultTimetable[section]?.[dayIndex] || "";
                     const currentValue = content || "";
 
-                    // 样式判断：如果当前值与默认值不同，添加红色加粗
                     if (currentValue.trim() !== defaultValue.trim()) {
                         cell.classList.add('modified');
                     }
                     
-                    // 显示内容：应用智能换行
                     if (currentValue && currentValue.trim() !== "") {
                         const formatted = formatText(currentValue);
                         cell.innerHTML = formatted.replace(/\n/g, '<br>');
@@ -280,45 +262,32 @@
                         cell.innerHTML = "";
                     }
                     
-                    // 绑定点击编辑
                     cell.addEventListener('click', (e) => {
-                        // 如果正在拖拽，不触发编辑
                         if(cell.classList.contains('dragging')) return;
                         editCell(cell);
                     });
                     row.appendChild(cell);
                 });
-                
                 tbody.appendChild(row);
             });
         }
 
-        // 编辑单元格
         function editCell(cell) {
             if (cell.querySelector('textarea')) return;
-            
-            // 获取原始数据（不带格式化换行，方便编辑）
             const rawText = currentData[cell.dataset.section][cell.dataset.day] || "";
-            
             const input = document.createElement('textarea');
             input.className = 'w-full h-full p-1 border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-200 text-center text-sm resize-none';
             input.value = rawText; 
             input.style.height = '100%';
             input.style.minHeight = '60px';
-            
             cell.innerHTML = '';
             cell.appendChild(input);
             input.focus();
 
             const saveEdit = async () => {
                 const newText = input.value.trim();
-                
-                // 更新数据模型
                 currentData[cell.dataset.section][cell.dataset.day] = newText;
-                
-                // 重新渲染以更新样式和换行
                 renderTimetable(currentData);
-                
                 await saveData(currentData);
             };
 
@@ -331,11 +300,8 @@
             });
         }
 
-        // 拖拽功能设置
         function setupDragAndDrop() {
             const tbody = document.getElementById('timetableBody');
-            
-            // 使用事件委托处理拖拽，性能更好且不需要每次渲染都绑定
             tbody.addEventListener('dragstart', handleDragStart);
             tbody.addEventListener('dragover', handleDragOver);
             tbody.addEventListener('dragleave', handleDragLeave);
@@ -349,13 +315,12 @@
                 dragSrcEl = cell;
                 cell.classList.add('dragging');
                 e.dataTransfer.effectAllowed = 'move';
-                // 必须设置数据，否则某些浏览器不触发 drop
                 e.dataTransfer.setData('text/plain', ''); 
             }
         }
 
         function handleDragOver(e) {
-            e.preventDefault(); // 必须阻止默认行为
+            e.preventDefault();
             const cell = e.target.closest('.course-cell');
             if (cell && cell !== dragSrcEl) {
                 cell.classList.add('drag-over');
@@ -365,15 +330,11 @@
 
         function handleDragLeave(e) {
             const cell = e.target.closest('.course-cell');
-            if (cell) {
-                cell.classList.remove('drag-over');
-            }
+            if (cell) cell.classList.remove('drag-over');
         }
 
         function handleDragEnd(e) {
-            if (dragSrcEl) {
-                dragSrcEl.classList.remove('dragging');
-            }
+            if (dragSrcEl) dragSrcEl.classList.remove('dragging');
             document.querySelectorAll('.course-cell').forEach(c => c.classList.remove('drag-over'));
             dragSrcEl = null;
         }
@@ -381,16 +342,12 @@
         async function handleDrop(e) {
             e.stopPropagation();
             const targetCell = e.target.closest('.course-cell');
-            
             if (dragSrcEl && targetCell && dragSrcEl !== targetCell) {
                 targetCell.classList.remove('drag-over');
-                
-                // 1. 交换 DOM 内容 (视觉交换)
                 const tempHTML = dragSrcEl.innerHTML;
                 dragSrcEl.innerHTML = targetCell.innerHTML;
                 targetCell.innerHTML = tempHTML;
 
-                // 2. 交换数据模型 (数据交换)
                 const sSec = dragSrcEl.dataset.section;
                 const sDay = dragSrcEl.dataset.day;
                 const tSec = targetCell.dataset.section;
@@ -400,27 +357,21 @@
                 currentData[sSec][sDay] = currentData[tSec][tDay];
                 currentData[tSec][tDay] = tempData;
                 
-                // 3. 重新渲染以更新红色样式状态
                 renderTimetable(currentData);
-                
-                // 4. 保存
                 await saveData(currentData);
             }
             return false;
         }
 
-        // 更新周次信息
         function updateWeekInfo() {
             const weekStart = new Date(startDate);
             weekStart.setDate(startDate.getDate() + currentWeek * 7);
             const weekEnd = new Date(weekStart);
             weekEnd.setDate(weekStart.getDate() + 4);
-            
             const format = (date) => `${date.getMonth() + 1}月${date.getDate()}日`;
             document.getElementById('weekInfo').textContent = `第${currentWeek + 1}周 (${format(weekStart)} - ${format(weekEnd)})`;
         }
 
-        // 切换周次
         document.getElementById('prevWeek').addEventListener('click', async () => {
             if (currentWeek > 0) {
                 currentWeek--;
@@ -436,7 +387,6 @@
             updateWeekInfo();
         });
 
-        // 重置数据
         document.getElementById('resetData').addEventListener('click', async () => {
             if (confirm('确定要重置当前周为默认课表吗？所有修改将丢失。')) {
                 currentData = JSON.parse(JSON.stringify(defaultTimetable));
@@ -446,23 +396,34 @@
             }
         });
 
-        // 导出 PDF
+        // ================= 修改了导出 PDF 逻辑 =================
         document.getElementById('exportPdf').addEventListener('click', () => {
             const element = document.getElementById('timetableContainer');
-            const originalClass = element.className;
-            element.className = 'bg-white p-2'; 
-
+            
+            // 1. 添加压缩样式类
+            element.classList.add('pdf-export-mode');
+            
             const opt = {
-                margin: [5, 5, 5, 5],
+                margin: 0, // 0 边距，最大化利用空间
                 filename: `课表_第${currentWeek + 1}周.pdf`,
                 image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-                jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
-                pagebreak: { mode: 'avoid-all' }
+                html2canvas: { 
+                    scale: 1.5, // 降低缩放，防止图片过大
+                    useCORS: true,
+                    letterRendering: true,
+                    windowWidth: 1200 // 固定宽度，防止换行过多
+                },
+                jsPDF: { 
+                    unit: 'mm', 
+                    format: 'a4', 
+                    orientation: 'landscape' 
+                },
+                pagebreak: { mode: 'avoid-all' } 
             };
             
             html2pdf().set(opt).from(element).save().then(() => {
-                element.className = originalClass;
+                // 2. 导出完成后移除样式类，恢复原状
+                element.classList.remove('pdf-export-mode');
             });
         });
 
