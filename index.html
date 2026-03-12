@@ -48,19 +48,23 @@
         .status-online { background-color: #22c55e; }
         .status-offline { background-color: #ef4444; }
 
-        /* ================= 修改：PDF 导出专用样式 ================= */
-        /* 导出时不再缩小，而是保持正常或稍大，依靠宽度控制来填满 */
+        /* ================= PDF 导出专用样式 ================= */
         .pdf-export-mode {
-            /* 移除 transform scale，避免模糊和位置偏移 */
-            width: 100% !important; 
+            /* 导出时移除最大宽度限制，让表格撑开 */
+            max-width: none !important;
+            width: 100% !important;
+            /* 移除圆角和阴影，让 PDF 更整洁 */
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            border: 1px solid #ddd !important;
         }
         .pdf-export-mode table {
-            font-size: 14px !important; /* 导出时使用正常字体，保证清晰度 */
+            font-size: 14px !important; 
         }
         .pdf-export-mode th, 
         .pdf-export-mode td {
-            padding: 4px 2px !important; /* 正常内边距 */
-            min-height: 60px !important; /* 正常高度 */
+            padding: 4px 2px !important; 
+            min-height: 60px !important; 
             line-height: 1.3 !important;
         }
     </style>
@@ -72,7 +76,7 @@
         <p class="text-gray-600 font-medium" id="loadingText">正在连接云端...</p>
     </div>
 
-    <div class="max-w-7xl mx-auto">
+    <div class="max-w-7xl mx-auto" id="mainContainer">
         <!-- 状态指示器 -->
         <div class="flex items-center gap-2 mb-4 text-sm no-print">
             <span class="status-dot status-offline" id="statusDot"></span>
@@ -391,34 +395,32 @@
             }
         });
 
-        // ================= 修改：导出 PDF 逻辑 =================
+        // ================= 修复：导出 PDF 逻辑 =================
         document.getElementById('exportPdf').addEventListener('click', () => {
             const element = document.getElementById('timetableContainer');
+            const mainContainer = document.getElementById('mainContainer');
             
-            // 1. 保存原始样式
-            const originalStyle = {
-                width: element.style.width,
-                className: element.className
-            };
-
-            // 2. 应用导出专用样式
-            // A4 横向 297mm，在 96dpi 下约为 1123px。
-            // 强制设置宽度，让内容横向撑开，这样生成的图片就会填满 A4 纸
-            element.style.width = '1123px'; 
+            // 1. 保存原始状态
+            const originalOverflow = element.style.overflow;
+            const originalClass = element.className;
+            
+            // 2. 应用导出模式
+            // 添加 pdf-export-mode 类，移除最大宽度限制，让表格尽可能宽
             element.classList.add('pdf-export-mode');
-            // 临时移除圆角和阴影，让 PDF 更整洁
-            element.classList.remove('rounded-lg', 'shadow-md');
-            element.classList.add('border', 'border-gray-200');
+            element.style.overflow = 'visible'; // 确保内容不被裁剪
             
+            // 3. 配置导出选项
             const opt = {
-                margin: 0, // 0 边距，完全填满
+                margin: 0, // 0 边距，最大化利用空间
                 filename: `课表_第${currentWeek + 1}周.pdf`,
                 image: { type: 'jpeg', quality: 0.98 },
                 html2canvas: { 
-                    scale: 2, // 2 倍缩放，保证打印清晰
+                    scale: 2, // 2 倍缩放，保证清晰度
                     useCORS: true,
                     letterRendering: true,
-                    windowWidth: 1123 // 固定截图宽度
+                    scrollX: 0, // 强制从最左侧开始截图，防止周一丢失
+                    scrollY: 0, // 强制从最上侧开始截图
+                    windowWidth: 1200 // 设置一个足够宽的虚拟窗口，确保能容纳所有列
                 },
                 jsPDF: { 
                     unit: 'mm', 
@@ -429,9 +431,10 @@
             };
             
             html2pdf().set(opt).from(element).save().then(() => {
-                // 3. 恢复原始样式
-                element.style.width = originalStyle.width;
-                element.className = originalStyle.className;
+                // 4. 恢复原始状态
+                element.classList.remove('pdf-export-mode');
+                element.className = originalClass;
+                element.style.overflow = originalOverflow;
             });
         });
 
